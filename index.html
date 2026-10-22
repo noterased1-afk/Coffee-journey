@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#FAF6EF">
+  <meta name="description" content="두 사람이 함께 쓰는 커피 테이스팅 노트">
+  <title>Coffee Journey ☕</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>☕</text></svg>">
+  <link rel="stylesheet" href="./style.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <div class="app">
+    <header class="app-header">
+      <h1 class="app-title">Coffee Journey <span aria-hidden="true">☕</span></h1>
+    </header>
+
+    <main class="app-main">
+      <section id="view-list" class="view" data-view="list" aria-label="기록 목록"></section>
+      <section id="view-form" class="view" data-view="form" aria-label="새 기록 작성"></section>
+      <section id="view-stats" class="view" data-view="stats" aria-label="통계 및 설정"></section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="주요 메뉴">
+      <button type="button" class="nav-btn" data-nav="list">
+        <span class="nav-icon" data-icon="home"></span>
+        <span class="nav-label">기록 목록</span>
+      </button>
+      <button type="button" class="nav-btn nav-btn-new" data-nav="form">
+        <span class="nav-icon nav-icon-new" data-icon="plus"></span>
+        <span class="nav-label">새 기록</span>
+      </button>
+      <button type="button" class="nav-btn" data-nav="stats">
+        <span class="nav-icon" data-icon="chart"></span>
+        <span class="nav-label">통계/설정</span>
+      </button>
+    </nav>
+  </div>
+
+  <div class="sheet-backdrop" id="sheet" hidden>
+    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" tabindex="-1">
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <button type="button" class="icon-btn sheet-close" data-action="close-sheet" aria-label="닫기"><span data-icon="x"></span></button>
+      <div class="sheet-body" id="sheet-body"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <input type="file" id="import-file" accept="application/json,.json" hidden>
+</body>
+</html>
