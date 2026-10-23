@@ -11,7 +11,14 @@
 
   // Real-time sync (Firebase Firestore). Leave FIREBASE_CONFIG null to run local-only.
   // Paste the web app config from Firebase console → Project settings → Your apps.
-  const FIREBASE_CONFIG = null;
+  const FIREBASE_CONFIG = {
+    apiKey: 'AIzaSyBNrDFb6ZqsXHeu0Nsx43C6gRJ-wXDsg-I',
+    authDomain: 'coffee-journey-fd1a5.firebaseapp.com',
+    projectId: 'coffee-journey-fd1a5',
+    storageBucket: 'coffee-journey-fd1a5.firebasestorage.app',
+    messagingSenderId: '542861301990',
+    appId: '1:542861301990:web:8834d99a734d397b060327'
+  };
   const FIREBASE_SDK = [
     'https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js',
     'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js'
