@@ -18,6 +18,28 @@
   --dog: #C87D55;
   --chick: #E8B93C;
 
+  /* Roast levels, pale to dark */
+  --roast-light-bg: #FFF1D6;
+  --roast-light-fg: #C4741C;
+  --roast-ml-bg: #F7DDBF;
+  --roast-ml-fg: #A35E2B;
+  --roast-m-bg: #E4D3CA;
+  --roast-m-fg: #6D4C41;
+  --roast-md-bg: #6D4C41;
+  --roast-md-fg: #FFFFFF;
+  --roast-d-bg: #3E2723;
+  --roast-d-fg: #FFFFFF;
+
+  /* Info pills */
+  --pill-bg: #F3F1EE;
+  --pill-fg: #5E5650;
+  --caffeine-bg: #EAF2FE;
+  --caffeine-fg: #2F6FE0;
+  --decaf-bg: #E7F3E3;
+  --decaf-fg: #4D7A3F;
+  --sync-online: #5A9E5A;
+  --sync-offline: #E0A33C;
+
   --radius: 16px;
   --radius-sm: 10px;
   --radius-pill: 999px;
@@ -94,7 +116,7 @@ svg.icon { width: 20px; height: 20px; flex-shrink: 0; }
   padding: var(--safe-top) 16px 0;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   transform: translateX(-50%);
   background: rgba(250, 246, 239, 0.92);
   backdrop-filter: blur(10px);
@@ -133,7 +155,7 @@ svg.icon { width: 20px; height: 20px; flex-shrink: 0; }
   height: calc(var(--nav-h) + var(--safe-bottom));
   padding-bottom: var(--safe-bottom);
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   transform: translateX(-50%);
   background: var(--card);
   border-top: 1px solid var(--border);
@@ -159,17 +181,6 @@ svg.icon { width: 20px; height: 20px; flex-shrink: 0; }
 .nav-icon { display: inline-flex; }
 .nav-icon svg.icon { width: 22px; height: 22px; }
 
-.nav-icon-new {
-  width: 36px;
-  height: 28px;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-pill);
-  background: var(--bg-soft);
-  transition: background 180ms ease, color 180ms ease;
-}
-
-.nav-btn-new.active .nav-icon-new { background: var(--primary); color: #fff; }
 
 /* ---------- Common components ---------- */
 
@@ -979,3 +990,179 @@ svg.icon { width: 20px; height: 20px; flex-shrink: 0; }
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
+
+/* ---------- Header actions ---------- */
+
+.header-actions { display: flex; align-items: center; gap: 6px; }
+
+.header-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin-right: -6px;
+  border-radius: 50%;
+  color: var(--secondary);
+  transition: transform 120ms ease, color 180ms ease;
+}
+
+.header-add svg.icon { width: 30px; height: 30px; }
+.header-add:active { transform: scale(0.9); }
+.header-add.active { color: var(--primary); }
+
+.sync-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.sync-dot.online { background: var(--sync-online); }
+.sync-dot.offline { background: var(--sync-offline); }
+.sync-dot.error { background: var(--danger); }
+.sync-dot.connecting { animation: pulse 1s ease-in-out infinite alternate; }
+
+@keyframes pulse {
+  from { opacity: 0.3; }
+  to { opacity: 1; }
+}
+
+/* ---------- Pills & roast colors ---------- */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: var(--pill-bg);
+  color: var(--pill-fg);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.pill-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.pill-brand { margin-top: 6px; }
+.pill-ppg { background: var(--caffeine-bg); color: var(--caffeine-fg); font-weight: 800; }
+.pill-caffeine { background: var(--caffeine-bg); color: var(--caffeine-fg); border-radius: var(--radius-pill); }
+.pill-decaf { background: var(--decaf-bg); color: var(--decaf-fg); border-radius: var(--radius-pill); }
+
+.roast-light { --roast-bg: var(--roast-light-bg); --roast-fg: var(--roast-light-fg); }
+.roast-medium-light { --roast-bg: var(--roast-ml-bg); --roast-fg: var(--roast-ml-fg); }
+.roast-medium { --roast-bg: var(--roast-m-bg); --roast-fg: var(--roast-m-fg); }
+.roast-medium-dark { --roast-bg: var(--roast-md-bg); --roast-fg: var(--roast-md-fg); }
+.roast-dark { --roast-bg: var(--roast-d-bg); --roast-fg: var(--roast-d-fg); }
+
+.pill[class*="roast-"] { background: var(--roast-bg); color: var(--roast-fg); }
+
+.chip-roast::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--roast-bg);
+  box-shadow: inset 0 0 0 1px rgba(62, 39, 35, 0.2);
+}
+
+.chip-roast.selected {
+  background: var(--roast-bg);
+  border-color: var(--roast-bg);
+  color: var(--roast-fg);
+  box-shadow: inset 0 0 0 1.5px rgba(62, 39, 35, 0.15);
+}
+
+.chip-roast.selected::before { display: none; }
+
+.bar-fill.roast-bar { background: var(--roast-bg); box-shadow: inset 0 0 0 1px rgba(62, 39, 35, 0.12); }
+
+/* ---------- Record cards (everything visible at a glance) ---------- */
+
+.record-card { border-left: 0; padding: 18px 18px 8px; }
+.record-card:active { transform: none; }
+.record-list.quiet .record-card { animation: none; }
+
+.card-date { margin-bottom: 4px; font-size: 12px; font-weight: 600; color: var(--text-muted); }
+
+.card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.card-head .pill { flex-shrink: 0; margin-top: 1px; }
+
+.card-link {
+  display: inline;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+/* The whole card opens the detail sheet; the buttons in the footer sit above this layer. */
+.card-link::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+.card-link:focus-visible { outline: none; }
+.record-card:has(.card-link:focus-visible) { box-shadow: 0 0 0 3px rgba(200, 125, 85, 0.45); }
+
+.card-memo {
+  margin-top: 10px;
+  font-size: 14px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.record-card .tag-row { margin-top: 8px; }
+
+.card-foot {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  pointer-events: none;
+}
+
+.card-foot .card-raters { margin: 0; gap: 16px; font-size: 15px; }
+.card-foot .card-raters strong { font-size: 17px; font-weight: 800; color: var(--primary); }
+.card-actions { display: flex; pointer-events: auto; }
+
+.wish-card { padding-bottom: 18px; }
+
+/* ---------- Sync section ---------- */
+
+.sync-desc { margin-bottom: 12px; }
+.sync-desc code { font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--primary); }
+
+.sync-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-weight: 700;
+}
+
+.sync-status::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.sync-status.online::before { background: var(--sync-online); }
+.sync-status.offline::before { background: var(--sync-offline); }
+.sync-status.error { color: var(--danger); }
+.sync-status.error::before { background: var(--danger); }

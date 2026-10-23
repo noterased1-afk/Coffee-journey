@@ -9,7 +9,26 @@
   const STORAGE_KEY = 'coffeeJourney.v1';
   const DATA_VERSION = 2;
 
+  // Real-time sync (Firebase Firestore). Leave FIREBASE_CONFIG null to run local-only.
+  // Paste the web app config from Firebase console → Project settings → Your apps.
+  const FIREBASE_CONFIG = null;
+  const FIREBASE_SDK = [
+    'https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js',
+    'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js'
+  ];
+  const SYNC_KEY = 'coffeeJourney.sync';          // { code }
+  const SYNC_BASE_KEY = 'coffeeJourney.syncBase'; // last data known to be on the server
+  const SYNC_CODE_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789';
+  const SYNC_CODE_MIN = 20;
+
   const ROAST_LEVELS = ['Light', 'Medium-Light', 'Medium', 'Medium-Dark', 'Dark'];
+  const ROAST_LABELS = {
+    Light: '라이트',
+    'Medium-Light': '라이트 미디엄',
+    Medium: '미디엄',
+    'Medium-Dark': '미디엄 다크',
+    Dark: '다크'
+  };
   const DEFAULT_TAGS = ['산미', '자스민', '시트러스', '베리', '초콜릿', '견과류', '카라멜', '꿀', '플로럴', '스톤프루트', '홍차', '흑설탕'];
   const TASTE_ITEMS = [
     { key: 'acidity', label: '산미', en: 'Acidity' },
@@ -30,6 +49,7 @@
   const ICONS = {
     home: '<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
     plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+    'circle-plus': '<circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="M12 8v8"/>',
     heart: '<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/>',
     chart: '<path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>',
     filter: '<path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/>',
@@ -40,7 +60,9 @@
     download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>',
     upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/>',
     rotate: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>',
-    check: '<path d="M20 6 9 17l-5-5"/>'
+    check: '<path d="M20 6 9 17l-5-5"/>',
+    share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.59 13.51 6.83 3.98"/><path d="m15.41 6.51-6.82 3.98"/>',
+    link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>'
   };
 
   /* ===== Utils ===== */
@@ -61,6 +83,11 @@
     return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
   }
 
+  // Ids double as Firestore document ids, so only allow a safe character set.
+  function safeId(value, prefix) {
+    return typeof value === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(value) ? value : uid(prefix);
+  }
+
   function toNum(value) {
     if (value === null || value === undefined || value === '') return null;
     const n = Number(String(value).replace(/,/g, ''));
@@ -69,6 +96,7 @@
 
   const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
   const pad = (n) => String(n).padStart(2, '0');
+  const roastClass = (level) => `roast-${level.toLowerCase()}`;
 
   function todayISO() {
     const d = new Date();
@@ -119,6 +147,22 @@
 
   function uniqueTags(list) {
     return Array.from(new Set(list.filter((t) => typeof t === 'string').map((t) => t.trim()).filter(Boolean)));
+  }
+
+  function readJSON(key) {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : null;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function writeJSON(key, value) {
+    try {
+      if (value === null) localStorage.removeItem(key);
+      else localStorage.setItem(key, JSON.stringify(value));
+    } catch (err) { /* storage unavailable; ignore */ }
   }
 
   let toastTimer = null;
@@ -172,7 +216,7 @@
     const price = toNum(raw.price);
 
     return {
-      id: str(raw.id) || uid(),
+      id: safeId(raw.id, 'r'),
       createdAt,
       updatedAt: isTimestamp(raw.updatedAt) ? raw.updatedAt : createdAt,
       date: isISODate(raw.date) ? raw.date : '',
@@ -203,7 +247,7 @@
     const price = toNum(raw.price);
 
     return {
-      id: str(raw.id) || uid('w'),
+      id: safeId(raw.id, 'w'),
       createdAt,
       updatedAt: isTimestamp(raw.updatedAt) ? raw.updatedAt : createdAt,
       name,
@@ -222,12 +266,14 @@
     if (!src || typeof src !== 'object' || !Array.isArray(src.records)) return null;
     return {
       version: DATA_VERSION,
-      customTags: Array.isArray(src.customTags)
-        ? uniqueTags(src.customTags).filter((t) => !DEFAULT_TAGS.includes(t))
-        : [],
+      customTags: normalizeCustomTags(src.customTags),
       records: src.records.map(normalizeRecord).filter(Boolean),
       wishlist: Array.isArray(src.wishlist) ? src.wishlist.map(normalizeWish).filter(Boolean) : []
     };
+  }
+
+  function normalizeCustomTags(list) {
+    return Array.isArray(list) ? uniqueTags(list).filter((t) => !DEFAULT_TAGS.includes(t)) : [];
   }
 
   function addMissing(target, items) {
@@ -331,11 +377,11 @@
       }
     ].map(normalizeWish);
 
-    const customTags = uniqueTags(records.flatMap((r) => r.flavorTags)).filter((t) => !DEFAULT_TAGS.includes(t));
+    const customTags = normalizeCustomTags(records.flatMap((r) => r.flavorTags));
     return { customTags, records, wishlist };
   }
 
-  function save() {
+  function saveLocal() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state.data));
       return true;
@@ -343,6 +389,13 @@
       toast('저장에 실패했어요. 저장 공간을 확인해 주세요', 'error');
       return false;
     }
+  }
+
+  // Every mutation calls save(): it caches locally and pushes the diff to the shared space.
+  function save() {
+    const ok = saveLocal();
+    pushChanges();
+    return ok;
   }
 
   function load() {
@@ -359,7 +412,7 @@
     if (raw === null) {
       // First visit only: start with the seed journal.
       state.data = { ...emptyData(), ...seedData() };
-      save();
+      saveLocal();
       return;
     }
 
@@ -367,11 +420,11 @@
       const data = migrate(JSON.parse(raw));
       if (!data) throw new Error('Invalid data shape');
       state.data = data;
-      save();
+      saveLocal();
     } catch (err) {
       try { localStorage.setItem(`${STORAGE_KEY}.corrupt`, raw); } catch (e) { /* ignore */ }
       state.data = emptyData();
-      save();
+      saveLocal();
       toast('저장된 데이터를 읽지 못해 백업 후 새로 시작해요', 'error');
     }
   }
@@ -388,7 +441,9 @@
     editingId: null,
     formReady: false,
     formTags: new Set(),
-    pendingImport: null
+    detailId: null,
+    pendingImport: null,
+    quietRender: false
   };
 
   const views = {};
@@ -426,6 +481,402 @@
     const list = state.data.records.filter((r) =>
       (!q || r.name.toLowerCase().includes(q) || r.roastery.toLowerCase().includes(q)) && matchesFilters(r));
     return list.sort(state.sort === 'rating' ? byRating : byLatest);
+  }
+
+  /* ===== Sync (Firestore) =====
+     Layout: journeys/{code} { customTags }, journeys/{code}/records/{id}, journeys/{code}/wishlist/{id}.
+     Local edits are diffed against `sync.remote` (what the server is known to hold) and pushed;
+     snapshots from the server replace local data, so both phones converge. */
+
+  const sync = {
+    code: null,
+    db: null,
+    root: null,
+    ready: false,
+    status: 'off',
+    remote: emptyRemote(),
+    unsubs: [],
+    pendingLink: null
+  };
+
+  function emptyRemote() {
+    return { records: new Map(), wishlist: new Map(), customTags: '[]' };
+  }
+
+  const NORMALIZE = { records: normalizeRecord, wishlist: normalizeWish };
+  const SYNC_STATUS_TEXT = {
+    off: '연결 안 됨',
+    connecting: '연결 중…',
+    online: '실시간 동기화 중',
+    offline: '오프라인 · 연결되면 자동으로 반영돼요',
+    error: '동기화 오류'
+  };
+
+  function normalizeCode(value) {
+    return String(value || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
+  }
+
+  function generateCode() {
+    const bytes = new Uint8Array(24);
+    crypto.getRandomValues(bytes);
+    const chars = Array.from(bytes, (b) => SYNC_CODE_CHARS[b % SYNC_CODE_CHARS.length]).join('');
+    return chars.match(/.{4}/g).join('-');
+  }
+
+  function maskCode(code) {
+    return `${code.slice(0, 4)}-••••-••••-${code.slice(-4)}`;
+  }
+
+  function joinLink(code) {
+    return `${location.origin}${location.pathname}#join=${code}`;
+  }
+
+  function setSyncStatus(status, detail = '') {
+    sync.status = status;
+    const text = SYNC_STATUS_TEXT[status] + (detail ? ` (${detail})` : '');
+    const dot = $('#sync-dot');
+    dot.hidden = status === 'off';
+    dot.className = `sync-dot ${status}`;
+    dot.title = text;
+    dot.setAttribute('aria-label', `동기화 상태: ${text}`);
+    const label = $('#sync-status');
+    if (label) {
+      label.textContent = text;
+      label.className = `sync-status ${status}`;
+    }
+  }
+
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const el = document.createElement('script');
+      el.src = src;
+      el.onload = resolve;
+      el.onerror = () => reject(new Error(`Failed to load ${src}`));
+      document.head.appendChild(el);
+    });
+  }
+
+  let firebasePromise = null;
+  function startFirebase() {
+    if (!firebasePromise) {
+      firebasePromise = (async () => {
+        for (const src of FIREBASE_SDK) await loadScript(src);
+        const app = window.firebase.apps.length ? window.firebase.app() : window.firebase.initializeApp(FIREBASE_CONFIG);
+        const db = window.firebase.firestore(app);
+        // Offline cache: writes made offline are queued and sent when the phone reconnects.
+        try { await db.enablePersistence({ synchronizeTabs: true }); } catch (err) { /* unsupported; online-only */ }
+        sync.db = db;
+        return db;
+      })().catch((err) => {
+        firebasePromise = null;
+        throw err;
+      });
+    }
+    return firebasePromise;
+  }
+
+  function serialize(item) {
+    return JSON.stringify(item);
+  }
+
+  function saveSyncBase() {
+    writeJSON(SYNC_BASE_KEY, {
+      records: Object.fromEntries(sync.remote.records),
+      wishlist: Object.fromEntries(sync.remote.wishlist),
+      customTags: sync.remote.customTags
+    });
+  }
+
+  function loadSyncBase() {
+    const base = readJSON(SYNC_BASE_KEY);
+    if (!base) return emptyRemote();
+    return {
+      records: new Map(Object.entries(base.records || {})),
+      wishlist: new Map(Object.entries(base.wishlist || {})),
+      customTags: typeof base.customTags === 'string' ? base.customTags : '[]'
+    };
+  }
+
+  function remoteFromData(data) {
+    return {
+      records: new Map(data.records.map((r) => [r.id, serialize(r)])),
+      wishlist: new Map(data.wishlist.map((w) => [w.id, serialize(w)])),
+      customTags: serialize(data.customTags)
+    };
+  }
+
+  function pushChanges() {
+    if (!sync.ready) return;
+    const ops = [];
+    ['records', 'wishlist'].forEach((kind) => {
+      const remote = sync.remote[kind];
+      const local = new Map(state.data[kind].map((item) => [item.id, item]));
+      local.forEach((item, id) => {
+        const json = serialize(item);
+        if (remote.get(id) !== json) {
+          ops.push((batch) => batch.set(sync.root.collection(kind).doc(id), item));
+          remote.set(id, json);
+        }
+      });
+      [...remote.keys()].forEach((id) => {
+        if (!local.has(id)) {
+          ops.push((batch) => batch.delete(sync.root.collection(kind).doc(id)));
+          remote.delete(id);
+        }
+      });
+    });
+    const tags = serialize(state.data.customTags);
+    if (tags !== sync.remote.customTags) {
+      ops.push((batch) => batch.set(sync.root, { customTags: state.data.customTags, updatedAt: new Date().toISOString() }, { merge: true }));
+      sync.remote.customTags = tags;
+    }
+    if (!ops.length) return;
+
+    // Firestore batches hold at most 500 writes.
+    for (let i = 0; i < ops.length; i += 400) {
+      const batch = sync.db.batch();
+      ops.slice(i, i + 400).forEach((op) => op(batch));
+      batch.commit().catch((err) => setSyncStatus('error', err.code || err.message));
+    }
+    saveSyncBase();
+  }
+
+  function applyRemote(kind, snap) {
+    const items = snap.docs.map((doc) => NORMALIZE[kind]({ ...doc.data(), id: doc.id })).filter(Boolean);
+    const next = new Map(items.map((item) => [item.id, serialize(item)]));
+    const prev = sync.remote[kind];
+    const changed = next.size !== prev.size || [...next].some(([id, json]) => prev.get(id) !== json)
+      || serialize(state.data[kind].map((i) => i.id).sort()) !== serialize([...next.keys()].sort());
+    sync.remote[kind] = next;
+    updateConnectionStatus(snap);
+    if (!changed) return;
+    state.data[kind] = items;
+    afterRemoteChange();
+  }
+
+  function applyRemoteMeta(snap) {
+    updateConnectionStatus(snap);
+    if (!snap.exists) return;
+    const tags = normalizeCustomTags(snap.data().customTags);
+    const json = serialize(tags);
+    sync.remote.customTags = json;
+    if (json === serialize(state.data.customTags)) return;
+    state.data.customTags = tags;
+    afterRemoteChange();
+  }
+
+  function updateConnectionStatus(snap) {
+    if (sync.status === 'error') return;
+    setSyncStatus(snap.metadata.fromCache ? 'offline' : 'online');
+  }
+
+  function afterRemoteChange() {
+    saveLocal();
+    saveSyncBase();
+    state.quietRender = true;
+    renderList();
+    renderWish();
+    // Don't rebuild the settings tab while someone is typing in it.
+    if (!views.stats.contains(document.activeElement)) renderStats();
+    state.quietRender = false;
+    if (state.detailId) {
+      if (findRecord(state.detailId)) renderDetail(state.detailId, true);
+      else {
+        closeSheet();
+        toast('보고 있던 기록이 다른 기기에서 삭제됐어요');
+      }
+    }
+  }
+
+  function stopListeners() {
+    sync.unsubs.forEach((unsub) => unsub());
+    sync.unsubs = [];
+  }
+
+  function startListeners() {
+    stopListeners();
+    const opts = { includeMetadataChanges: true };
+    const onError = (err) => setSyncStatus('error', err.code === 'permission-denied' ? '권한 없음' : err.code || err.message);
+    sync.unsubs = [
+      sync.root.collection('records').onSnapshot(opts, (snap) => applyRemote('records', snap), onError),
+      sync.root.collection('wishlist').onSnapshot(opts, (snap) => applyRemote('wishlist', snap), onError),
+      sync.root.onSnapshot(opts, applyRemoteMeta, onError)
+    ];
+  }
+
+  // Resume a link saved on this phone (called on startup and when the phone comes back online).
+  async function resumeSync() {
+    if (!FIREBASE_CONFIG || !sync.code || sync.ready) return;
+    sync.remote = loadSyncBase();
+    setSyncStatus('connecting');
+    try {
+      const db = await startFirebase();
+      sync.root = db.collection('journeys').doc(sync.code);
+      sync.ready = true;
+      pushChanges(); // edits made while the SDK couldn't load
+      startListeners();
+    } catch (err) {
+      setSyncStatus('offline');
+    }
+  }
+
+  async function linkSync(rawCode) {
+    if (!FIREBASE_CONFIG) return;
+    const code = normalizeCode(rawCode);
+    if (code.replace(/-/g, '').length < SYNC_CODE_MIN) {
+      toast('공유 코드가 너무 짧아요. "새 코드 만들기"로 만들어 주세요', 'error');
+      return;
+    }
+    setSyncStatus('connecting');
+    try {
+      const db = await startFirebase();
+      const root = db.collection('journeys').doc(code);
+      const [meta, records, wishlist] = await Promise.all([
+        root.get({ source: 'server' }),
+        root.collection('records').get({ source: 'server' }),
+        root.collection('wishlist').get({ source: 'server' })
+      ]);
+      const remoteData = {
+        customTags: meta.exists ? normalizeCustomTags(meta.data().customTags) : [],
+        records: records.docs.map((d) => normalizeRecord({ ...d.data(), id: d.id })).filter(Boolean),
+        wishlist: wishlist.docs.map((d) => normalizeWish({ ...d.data(), id: d.id })).filter(Boolean)
+      };
+
+      if (!meta.exists && !remoteData.records.length && !remoteData.wishlist.length) {
+        // A brand-new space: this phone's data becomes the shared data.
+        finishLink(code, root, emptyRemote());
+        toast('새 공유 공간을 만들었어요. 다른 폰에서도 같은 코드로 연결해 주세요');
+        return;
+      }
+
+      sync.pendingLink = { code, root, remoteData };
+      openSheet(`
+        <div class="detail-head"><h2 class="detail-title" id="sheet-title">공유 공간에 연결</h2></div>
+        <p class="sheet-text">이 코드에는 이미 기록 <strong>${remoteData.records.length}개</strong>, 위시 <strong>${remoteData.wishlist.length}개</strong>가 있어요. 이 폰에 있던 기록은 어떻게 할까요?</p>
+        <div class="sheet-stack">
+          <button type="button" class="btn btn-primary btn-block" data-action="sync-choose" data-mode="remote">공유 기록으로 시작하기 (추천)</button>
+          <button type="button" class="btn btn-ghost btn-block" data-action="sync-choose" data-mode="merge">이 폰 기록도 합치기</button>
+          <button type="button" class="btn btn-ghost btn-block" data-action="close-sheet">취소</button>
+        </div>`);
+    } catch (err) {
+      setSyncStatus('off');
+      toast(err.code === 'permission-denied' ? '서버 권한 설정을 확인해 주세요' : '연결하지 못했어요. 인터넷 연결을 확인해 주세요', 'error');
+    }
+  }
+
+  function chooseLinkMode(mode) {
+    const pending = sync.pendingLink;
+    if (!pending) return;
+    sync.pendingLink = null;
+    const { remoteData } = pending;
+    if (mode === 'remote') {
+      state.data = { ...emptyData(), ...remoteData };
+    } else {
+      state.data.records = mergeById(remoteData.records, state.data.records);
+      state.data.wishlist = mergeById(remoteData.wishlist, state.data.wishlist);
+      state.data.customTags = uniqueTags([...remoteData.customTags, ...state.data.customTags]);
+    }
+    state.editingId = null;
+    state.formReady = false;
+    finishLink(pending.code, pending.root, remoteFromData(remoteData));
+    closeSheet();
+    refresh();
+    navigate('list');
+    toast('연결됐어요! 이제 두 폰의 기록이 함께 바뀌어요 🐶🐥');
+  }
+
+  function finishLink(code, root, remote) {
+    sync.code = code;
+    sync.root = root;
+    sync.remote = remote;
+    sync.ready = true;
+    writeJSON(SYNC_KEY, { code });
+    saveLocal();
+    pushChanges();
+    saveSyncBase();
+    startListeners();
+    renderStats();
+  }
+
+  function unlinkSync() {
+    if (!confirm('이 폰의 동기화 연결을 해제할까요? 지금까지의 기록은 이 폰에 그대로 남아요.')) return;
+    stopListeners();
+    sync.code = null;
+    sync.root = null;
+    sync.ready = false;
+    sync.remote = emptyRemote();
+    writeJSON(SYNC_KEY, null);
+    writeJSON(SYNC_BASE_KEY, null);
+    setSyncStatus('off');
+    renderStats();
+    toast('동기화 연결을 해제했어요');
+  }
+
+  async function shareJoinLink() {
+    const url = joinLink(sync.code);
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'Coffee Journey ☕', text: '같이 커피 기록하자! 링크를 열면 바로 연결돼요', url });
+        return;
+      } catch (err) {
+        if (err.name === 'AbortError') return;
+      }
+    }
+    copyText(url, '연결 링크를 복사했어요');
+  }
+
+  async function copyText(text, message) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast(message);
+    } catch (err) {
+      prompt('아래 내용을 복사해 주세요', text);
+    }
+  }
+
+  function handleJoinHash() {
+    const match = location.hash.match(/join=([a-z0-9-]+)/i);
+    if (!match) return;
+    history.replaceState(null, '', location.pathname + location.search);
+    const code = normalizeCode(match[1]);
+    if (!FIREBASE_CONFIG) return;
+    if (sync.code === code) {
+      toast('이미 이 코드로 연결돼 있어요');
+    } else if (sync.code) {
+      toast('다른 코드로 연결돼 있어요. 연결 해제 후 다시 열어 주세요', 'error');
+    } else {
+      navigate('stats');
+      linkSync(code);
+    }
+  }
+
+  /* ===== Render: shared pieces ===== */
+
+  function caffeinePillHTML(decaf) {
+    return decaf
+      ? '<span class="pill pill-decaf">🌙 디카페인</span>'
+      : '<span class="pill pill-caffeine">⚡ 카페인</span>';
+  }
+
+  function infoPillsHTML(item, withRoast) {
+    const pills = [];
+    if (withRoast && item.roastLevel) {
+      pills.push(`<span class="pill ${roastClass(item.roastLevel)}">🔥 ${ROAST_LABELS[item.roastLevel]}</span>`);
+    }
+    if (item.grams !== null) pills.push(`<span class="pill">⚖️ ${formatNumber(item.grams, 1)}g</span>`);
+    if (item.price !== null) pills.push(`<span class="pill">💰 ${formatWon(item.price)}</span>`);
+    if (item.pricePerGram !== null) pills.push(`<span class="pill pill-ppg">₩${formatNumber(item.pricePerGram, 1)} / g</span>`);
+    return pills.length ? `<div class="pill-row">${pills.join('')}</div>` : '';
+  }
+
+  function emptyHTML(emoji, title, desc, buttonHTML = '') {
+    return `
+      <div class="empty">
+        <div class="empty-emoji" aria-hidden="true">${emoji}</div>
+        <p class="empty-title">${title}</p>
+        <p>${desc}</p>
+        ${buttonHTML}
+      </div>`;
   }
 
   /* ===== Render: list ===== */
@@ -469,43 +920,36 @@
       <div class="record-list" id="record-list"></div>`;
   }
 
-  function emptyHTML(emoji, title, desc, buttonHTML = '') {
-    return `
-      <div class="empty">
-        <div class="empty-emoji" aria-hidden="true">${emoji}</div>
-        <p class="empty-title">${title}</p>
-        <p>${desc}</p>
-        ${buttonHTML}
-      </div>`;
-  }
-
   function cardHTML(r, i) {
     const tags = r.flavorTags.slice(0, 3);
-    const score = formatScore(avgOverall(r));
+    const id = escapeHTML(r.id);
+    const name = escapeHTML(r.name);
     return `
-      <article class="card record-card" role="button" tabindex="0" data-action="open-detail" data-id="${escapeHTML(r.id)}" style="--i:${Math.min(i, 10)}">
-        <div class="card-top">
-          ${r.date ? `<span>${formatDate(r.date)}</span>` : ''}
-          ${r.roastLevel ? `<span class="badge">${r.roastLevel}</span>` : ''}
-          ${r.decaf ? '<span class="badge badge-decaf">디카페인</span>' : ''}
+      <article class="card record-card" style="--i:${Math.min(i, 10)}">
+        ${r.date ? `<p class="card-date">${formatDate(r.date)}</p>` : ''}
+        <div class="card-head">
+          <h3 class="card-title"><button type="button" class="card-link" data-action="open-detail" data-id="${id}">${name}</button></h3>
+          ${caffeinePillHTML(r.decaf)}
         </div>
-        <div class="card-main">
-          <div>
-            <h3 class="card-title">${escapeHTML(r.name)}</h3>
-            ${r.roastery ? `<p class="card-roastery">${escapeHTML(r.roastery)}</p>` : ''}
-          </div>
-          <div class="score-badge${score === '-' ? ' is-empty' : ''}" aria-label="종합 점수 ${score === '-' ? '없음' : `${score}점`}"><strong>${score}</strong><span>/ 10</span></div>
-        </div>
-        <div class="card-raters">
-          ${RATERS.map((rt) => `<span>${rt.emoji} ${formatScore(r.ratings[rt.id].overall)}</span>`).join('')}
-        </div>
+        ${r.roastery ? `<span class="pill pill-brand">${escapeHTML(r.roastery)}</span>` : ''}
+        ${infoPillsHTML(r, true)}
+        ${r.memo ? `<p class="card-memo">${escapeHTML(r.memo)}</p>` : ''}
         ${tags.length ? `<div class="tag-row">${tags.map((t) => `<span class="tag">#${escapeHTML(t)}</span>`).join('')}</div>` : ''}
+        <div class="card-foot">
+          <div class="card-raters">
+            ${RATERS.map((rt) => `<span><span aria-hidden="true">${rt.emoji}</span><span class="sr-only">${rt.label}</span> <strong>${formatScore(r.ratings[rt.id].overall)}</strong></span>`).join('')}
+          </div>
+          <div class="card-actions">
+            <button type="button" class="icon-btn" data-action="edit" data-id="${id}" aria-label="${name} 수정">${icon('pencil')}</button>
+            <button type="button" class="icon-btn" data-action="delete" data-id="${id}" aria-label="${name} 삭제">${icon('trash')}</button>
+          </div>
+        </div>
       </article>`;
   }
 
-  function filterChipHTML(group, value, label) {
+  function filterChipHTML(group, value, label, extraClass = '') {
     const on = state.filters[group] === value;
-    return `<button type="button" class="chip chip-sm${on ? ' selected' : ''}" data-action="filter" data-group="${group}" data-value="${escapeHTML(value)}" aria-pressed="${on}">${escapeHTML(label)}</button>`;
+    return `<button type="button" class="chip chip-sm ${extraClass}${on ? ' selected' : ''}" data-action="filter" data-group="${group}" data-value="${escapeHTML(value)}" aria-pressed="${on}">${escapeHTML(label)}</button>`;
   }
 
   function renderFilters() {
@@ -516,8 +960,9 @@
     $('#filter-roastery').innerHTML = brands.length
       ? brands.map((b) => filterChipHTML('roastery', b, b)).join('')
       : '<p class="muted">브랜드를 입력한 기록이 없어요</p>';
-    $('#filter-caffeine').innerHTML = filterChipHTML('caffeine', 'caffeine', '☕ 카페인') + filterChipHTML('caffeine', 'decaf', '🌙 디카페인');
-    $('#filter-roast').innerHTML = ROAST_LEVELS.map((l) => filterChipHTML('roast', l, l)).join('') + filterChipHTML('roast', 'none', '미지정');
+    $('#filter-caffeine').innerHTML = filterChipHTML('caffeine', 'caffeine', '⚡ 카페인') + filterChipHTML('caffeine', 'decaf', '🌙 디카페인');
+    $('#filter-roast').innerHTML = ROAST_LEVELS.map((l) => filterChipHTML('roast', l, ROAST_LABELS[l], `chip-roast ${roastClass(l)}`)).join('')
+      + filterChipHTML('roast', 'none', '미지정');
 
     const count = activeFilterCount();
     const toggle = $('[data-action="toggle-filter"]', views.list);
@@ -545,6 +990,7 @@
     renderFilters();
 
     const box = $('#record-list');
+    box.classList.toggle('quiet', state.quietRender);
     if (!total) {
       box.innerHTML = emptyHTML('☕', '아직 기록이 없어요', '오늘 마신 커피의 첫 기록을 남겨보세요',
         `<button type="button" class="btn btn-primary" data-action="go-form">${icon('plus')} 첫 기록 남기기</button>`);
@@ -630,7 +1076,7 @@
             <div class="chip-group" role="group" aria-labelledby="roast-label">
               ${ROAST_LEVELS.map((level) => {
                 const on = level === v.roastLevel;
-                return `<button type="button" class="chip${on ? ' selected' : ''}" data-action="roast" data-value="${level}" aria-pressed="${on}">${level}</button>`;
+                return `<button type="button" class="chip chip-roast ${roastClass(level)}${on ? ' selected' : ''}" data-action="roast" data-value="${level}" aria-pressed="${on}">${ROAST_LABELS[level]}</button>`;
               }).join('')}
             </div>
           </div>
@@ -697,8 +1143,8 @@
           </div>
         </section>
 
-        <div class="form-actions${record ? '' : ' single'}">
-          ${record ? '<button type="button" class="btn btn-ghost" data-action="cancel-edit">취소</button>' : ''}
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" data-action="cancel-edit">취소</button>
           <button type="submit" class="btn btn-primary">${icon('check')} ${record ? '수정 완료' : '기록 저장'}</button>
         </div>
       </form>`;
@@ -712,7 +1158,7 @@
   function caffeineToggleHTML(decaf, labelledBy) {
     return `
       <div class="segmented" role="group" aria-labelledby="${labelledBy}">
-        <button type="button" class="${decaf ? '' : 'selected'}" data-action="decaf" data-value="false" aria-pressed="${!decaf}">☕ 카페인</button>
+        <button type="button" class="${decaf ? '' : 'selected'}" data-action="decaf" data-value="false" aria-pressed="${!decaf}">⚡ 카페인</button>
         <button type="button" class="${decaf ? 'selected' : ''}" data-action="decaf" data-value="true" aria-pressed="${decaf}">🌙 디카페인</button>
       </div>`;
   }
@@ -887,16 +1333,18 @@
     return rows.some((row) => RATERS.some((rt) => row.values[rt.id] !== null));
   }
 
-  function renderDetail(id) {
+  // keepScroll: refresh in place (e.g. a remote edit) without jumping back to the top.
+  function renderDetail(id, keepScroll = false) {
     const r = findRecord(id);
     if (!r) return;
+    state.detailId = id;
 
     const info = [
       ['로스터리', r.roastery],
       ['원산지', r.origin],
       ['품종', r.variety],
-      ['로스팅 포인트', r.roastLevel],
-      ['카페인', r.decaf ? '디카페인 🌙' : '카페인 ☕'],
+      ['로스팅 포인트', ROAST_LABELS[r.roastLevel] || ''],
+      ['카페인', r.decaf ? '디카페인 🌙' : '카페인 ⚡'],
       ['총 용량', r.grams === null ? '' : `${formatNumber(r.grams, 1)}g`],
       ['총 가격', r.price === null ? '' : formatWon(r.price)],
       ['그램 당 가격', r.pricePerGram === null ? '' : formatWon(r.pricePerGram, 1)]
@@ -907,7 +1355,8 @@
       <div class="detail-head">
         <div class="card-top">
           ${r.date ? `<span>${formatDate(r.date)}</span>` : ''}
-          ${r.decaf ? '<span class="badge badge-decaf">디카페인</span>' : ''}
+          ${caffeinePillHTML(r.decaf)}
+          ${r.roastLevel ? `<span class="pill ${roastClass(r.roastLevel)}">🔥 ${ROAST_LABELS[r.roastLevel]}</span>` : ''}
         </div>
         <h2 class="detail-title" id="sheet-title">${escapeHTML(r.name)}</h2>
       </div>
@@ -954,25 +1403,20 @@
       <div class="sheet-actions">
         <button type="button" class="btn btn-danger" data-action="delete" data-id="${escapeHTML(r.id)}">${icon('trash')} 삭제</button>
         <button type="button" class="btn btn-primary" data-action="edit" data-id="${escapeHTML(r.id)}">${icon('pencil')} 수정</button>
-      </div>`);
+      </div>`, keepScroll);
   }
 
   /* ===== Render: wishlist ===== */
 
   function wishCardHTML(w, i) {
-    const price = [
-      w.grams === null ? '' : `${formatNumber(w.grams, 1)}g`,
-      w.price === null ? '' : formatWon(w.price),
-      w.pricePerGram === null ? '' : `<strong>${formatNumber(w.pricePerGram, 1)}원/g</strong>`
-    ].filter(Boolean);
     return `
-      <article class="card record-card wish-card" role="button" tabindex="0" data-action="edit-wish" data-id="${escapeHTML(w.id)}" style="--i:${Math.min(i, 10)}">
-        <div class="card-top">
-          ${w.decaf ? '<span class="badge badge-decaf">디카페인</span>' : '<span class="badge">카페인</span>'}
+      <article class="card record-card wish-card" style="--i:${Math.min(i, 10)}">
+        <div class="card-head">
+          <h3 class="card-title"><button type="button" class="card-link" data-action="edit-wish" data-id="${escapeHTML(w.id)}">${escapeHTML(w.name)}</button></h3>
+          ${caffeinePillHTML(w.decaf)}
         </div>
-        <h3 class="card-title">${escapeHTML(w.name)}</h3>
-        ${w.roastery ? `<p class="card-roastery">${escapeHTML(w.roastery)}</p>` : ''}
-        ${price.length ? `<p class="wish-price">${price.join(' · ')}</p>` : ''}
+        ${w.roastery ? `<span class="pill pill-brand">${escapeHTML(w.roastery)}</span>` : ''}
+        ${infoPillsHTML(w, false)}
         ${w.notes ? `<p class="wish-notes">${escapeHTML(w.notes)}</p>` : ''}
       </article>`;
   }
@@ -987,7 +1431,7 @@
         </div>
         <button type="button" class="btn btn-primary btn-sm" data-action="add-wish">${icon('plus')} 담기</button>
       </div>
-      <div class="record-list">
+      <div class="record-list${state.quietRender ? ' quiet' : ''}">
         ${list.length
           ? list.map(wishCardHTML).join('')
           : emptyHTML('🤍', '궁금한 원두를 담아두세요', '다음에 마셔보고 싶은 원두를 기록해 두면 잊지 않아요')}
@@ -1092,12 +1536,49 @@
 
   function rankRowsHTML(rows) {
     const max = Math.max(...rows.map((r) => r.count), 1);
-    return rows.map(({ name, count }) => `
+    return rows.map(({ name, count, barClass = 'primary' }) => `
       <div class="rank-row">
         <span class="name">${escapeHTML(name)}</span>
-        <div class="bar"><div class="bar-fill primary" style="--w:${(count / max) * 100}%"></div></div>
+        <div class="bar"><div class="bar-fill ${barClass}" style="--w:${(count / max) * 100}%"></div></div>
         <span class="val">${count}</span>
       </div>`).join('');
+  }
+
+  function syncSectionHTML() {
+    const title = '<h3 class="section-title">🔄 실시간 동기화</h3>';
+    if (!FIREBASE_CONFIG) {
+      return `
+        <section class="card section">
+          ${title}
+          <p class="muted">동기화 서버가 아직 설정되지 않았어요. 설정이 끝나면 여기서 두 폰을 연결할 수 있어요.</p>
+        </section>`;
+    }
+    if (!sync.code) {
+      return `
+        <section class="card section">
+          ${title}
+          <p class="muted sync-desc">두 폰에 같은 공유 코드를 넣으면 기록이 실시간으로 함께 바뀌어요. 한 폰에서 코드를 만들어 연결한 뒤, 공유 링크를 다른 폰에 보내 주세요.</p>
+          <div class="field">
+            <label class="field-label" for="sync-code">공유 코드</label>
+            <input class="input" id="sync-code" type="text" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="xxxx-xxxx-xxxx-xxxx-xxxx-xxxx" enterkeyhint="go">
+          </div>
+          <div class="data-actions">
+            <button type="button" class="btn btn-ghost" data-action="sync-generate">${icon('rotate')} 새 코드 만들기</button>
+            <button type="button" class="btn btn-primary" data-action="sync-link">${icon('link')} 연결하기</button>
+          </div>
+        </section>`;
+    }
+    return `
+      <section class="card section">
+        ${title}
+        <p class="sync-status ${sync.status}" id="sync-status" role="status">${SYNC_STATUS_TEXT[sync.status]}</p>
+        <p class="muted sync-desc">공유 코드 <code>${maskCode(sync.code)}</code></p>
+        <div class="data-actions">
+          <button type="button" class="btn btn-primary" data-action="sync-share">${icon('share')} 링크 보내기</button>
+          <button type="button" class="btn btn-ghost" data-action="sync-copy">코드 복사</button>
+          <button type="button" class="btn btn-ghost full" data-action="sync-unlink">이 폰 연결 해제</button>
+        </div>
+      </section>`;
   }
 
   function renderStats() {
@@ -1115,7 +1596,11 @@
       .map(([name, count]) => ({ name, count }));
 
     const roastRows = [...ROAST_LEVELS, '']
-      .map((level) => ({ name: level || '미지정', count: records.filter((r) => r.roastLevel === level).length }))
+      .map((level) => ({
+        name: ROAST_LABELS[level] || '미지정',
+        count: records.filter((r) => r.roastLevel === level).length,
+        barClass: level ? `roast-bar ${roastClass(level)}` : 'primary'
+      }))
       .filter((row) => row.count > 0);
 
     const tasteRows = tasteRowsFor((rater, key) => average(records.map((r) => r.ratings[rater][key])));
@@ -1157,9 +1642,13 @@
         ${roastRows.length ? rankRowsHTML(roastRows) : noData}
       </section>
 
+      ${syncSectionHTML()}
+
       <section class="card section">
         <h3 class="section-title">💾 데이터 관리</h3>
-        <p class="muted" style="margin-bottom:12px">데이터는 이 브라우저에만 저장돼요. 기기를 바꾸거나 방문 기록을 지우기 전에 내보내기로 백업해 주세요.</p>
+        <p class="muted" style="margin-bottom:12px">${sync.code
+          ? '기록은 연결된 폰들과 공유 공간에 함께 저장돼요. 혹시 모르니 가끔 내보내기로 백업해 두세요.'
+          : '데이터는 이 브라우저에만 저장돼요. 기기를 바꾸거나 방문 기록을 지우기 전에 내보내기로 백업해 주세요.'}</p>
         <div class="data-actions">
           <button type="button" class="btn btn-primary" data-action="export">${icon('download')} 내보내기</button>
           <button type="button" class="btn btn-secondary" data-action="import">${icon('upload')} 불러오기</button>
@@ -1176,15 +1665,18 @@
   let lastFocus = null;
   let sheetTimer = null;
 
-  function openSheet(html) {
+  function openSheet(html, keepScroll = false) {
     const backdrop = $('#sheet');
     const sheet = $('.sheet', backdrop);
+    const wasOpen = !backdrop.hidden && backdrop.classList.contains('open');
+    const scrollTop = sheet.scrollTop;
     clearTimeout(sheetTimer);
     $('#sheet-body').innerHTML = html;
     if (backdrop.hidden) lastFocus = document.activeElement;
     backdrop.hidden = false;
     document.body.style.overflow = 'hidden';
-    sheet.scrollTop = 0;
+    sheet.scrollTop = keepScroll && wasOpen ? scrollTop : 0;
+    if (keepScroll && wasOpen) return;
     // Two frames so the closed state is painted before the transition starts.
     requestAnimationFrame(() => requestAnimationFrame(() => backdrop.classList.add('open')));
     sheet.focus({ preventScroll: true });
@@ -1196,6 +1688,11 @@
     backdrop.classList.remove('open');
     document.body.style.overflow = '';
     state.pendingImport = null;
+    state.detailId = null;
+    if (sync.pendingLink) {
+      sync.pendingLink = null;
+      setSyncStatus('off');
+    }
     sheetTimer = setTimeout(() => {
       backdrop.hidden = true;
       $('#sheet-body').innerHTML = '';
@@ -1273,6 +1770,7 @@
     reader.readAsText(file);
   }
 
+  // Combines two lists by id; on a clash the more recently updated item wins.
   function mergeById(current, incoming) {
     const byId = new Map(current.map((item) => [item.id, item]));
     incoming.forEach((item) => {
@@ -1316,7 +1814,8 @@
   }
 
   function resetAll() {
-    if (!confirm('모든 기록, 위시리스트, 추가한 태그를 삭제할까요?')) return;
+    const scope = sync.code ? '연결된 모든 폰에서 ' : '';
+    if (!confirm(`${scope}모든 기록, 위시리스트, 추가한 태그를 삭제할까요?`)) return;
     if (!confirm('정말 삭제할까요? 되돌릴 수 없어요. (먼저 내보내기로 백업하는 걸 추천해요)')) return;
     state.data = emptyData();
     state.editingId = null;
@@ -1337,6 +1836,7 @@
       if (on) btn.setAttribute('aria-current', 'page');
       else btn.removeAttribute('aria-current');
     });
+    $('#new-record-btn').classList.toggle('active', name === 'form');
     window.scrollTo(0, 0);
   }
 
@@ -1349,15 +1849,13 @@
     setView(name);
   }
 
-  /* ===== Events ===== */
-
-  function openCardOnKey(e, handler) {
-    const card = e.target.closest('.record-card');
-    if (card && (e.key === 'Enter' || e.key === ' ')) {
-      e.preventDefault();
-      handler(card.dataset.id);
-    }
+  function editRecord(id) {
+    closeSheet();
+    openForm(id);
+    setView('form');
   }
+
+  /* ===== Events ===== */
 
   // Enter on a single-line input must not submit a form by accident.
   function preventEnterSubmit(e, onTagInput) {
@@ -1369,6 +1867,7 @@
 
   function bindEvents() {
     $$('.nav-btn').forEach((btn) => btn.addEventListener('click', () => navigate(btn.dataset.nav)));
+    $('#new-record-btn').addEventListener('click', () => navigate('form'));
 
     // List view
     views.list.addEventListener('input', (e) => {
@@ -1379,7 +1878,7 @@
     views.list.addEventListener('click', (e) => {
       const el = e.target.closest('[data-action]');
       if (!el) return;
-      const { action } = el.dataset;
+      const { action, id } = el.dataset;
       if (action === 'clear-search') {
         state.query = '';
         $('#search-input').value = '';
@@ -1399,12 +1898,15 @@
         state.filters = { roastery: '', caffeine: '', roast: '' };
         renderList();
       } else if (action === 'open-detail') {
-        renderDetail(el.dataset.id);
+        renderDetail(id);
+      } else if (action === 'edit') {
+        editRecord(id);
+      } else if (action === 'delete') {
+        deleteRecord(id);
       } else if (action === 'go-form') {
         navigate('form');
       }
     });
-    views.list.addEventListener('keydown', (e) => openCardOnKey(e, renderDetail));
 
     // Form view
     views.form.addEventListener('submit', (e) => {
@@ -1466,7 +1968,6 @@
       if (el.dataset.action === 'add-wish') openWishForm(null);
       else if (el.dataset.action === 'edit-wish') openWishForm(el.dataset.id);
     });
-    views.wish.addEventListener('keydown', (e) => openCardOnKey(e, openWishForm));
 
     // Stats view
     views.stats.addEventListener('click', (e) => {
@@ -1477,6 +1978,17 @@
       else if (action === 'import') $('#import-file').click();
       else if (action === 'restore-seed') restoreSeed();
       else if (action === 'reset') resetAll();
+      else if (action === 'sync-generate') $('#sync-code').value = generateCode();
+      else if (action === 'sync-link') linkSync($('#sync-code').value);
+      else if (action === 'sync-share') shareJoinLink();
+      else if (action === 'sync-copy') copyText(sync.code, '공유 코드를 복사했어요');
+      else if (action === 'sync-unlink') unlinkSync();
+    });
+    views.stats.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && e.target.id === 'sync-code' && !e.isComposing) {
+        e.preventDefault();
+        linkSync(e.target.value);
+      }
     });
 
     $('#import-file').addEventListener('change', (e) => {
@@ -1498,9 +2010,7 @@
       if (action === 'close-sheet') {
         closeSheet();
       } else if (action === 'edit') {
-        closeSheet();
-        openForm(id);
-        setView('form');
+        editRecord(id);
       } else if (action === 'delete') {
         deleteRecord(id);
       } else if (action === 'decaf') {
@@ -1511,6 +2021,8 @@
         applyImport('merge');
       } else if (action === 'import-replace') {
         applyImport('replace');
+      } else if (action === 'sync-choose') {
+        chooseLinkMode(el.dataset.mode);
       }
     });
     sheet.addEventListener('submit', (e) => {
@@ -1527,6 +2039,7 @@
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') closeSheet();
     });
+    window.addEventListener('online', resumeSync);
   }
 
   /* ===== Init ===== */
@@ -1540,10 +2053,14 @@
     $$('[data-icon]').forEach((el) => { el.innerHTML = icon(el.dataset.icon); });
 
     load();
+    const saved = FIREBASE_CONFIG ? readJSON(SYNC_KEY) : null;
+    sync.code = saved && saved.code ? normalizeCode(saved.code) : null;
     initListView();
     bindEvents();
     refresh();
     setView('list');
+    resumeSync();
+    handleJoinHash();
   }
 
   document.addEventListener('DOMContentLoaded', init);

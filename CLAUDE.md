@@ -5,14 +5,15 @@
 ## 프로젝트 개요
 
 **Coffee Journey ☕** — 두 명의 평가자(🐶 강쥐, 🐥 공쥬)가 함께 쓰는 모바일 커피 테이스팅 기록 웹앱.
-원두 정보, 향미 평가, 기록 목록, 위시리스트, 통계를 브라우저 하나로 관리하며, 서버 없이 `localStorage`에 저장한다.
+원두 정보, 향미 평가, 기록 목록, 위시리스트, 통계를 관리한다. 기본은 `localStorage` 저장이고, 공유 코드로 연결하면 Firebase Firestore를 통해 두 폰이 실시간 동기화된다.
 GitHub Pages(`main` 브랜치 루트)로 정적 배포한다.
 
 ## 기술 스택 & 제약
 
 - **순수 HTML / CSS / Vanilla JavaScript만 사용.** React, Vue, jQuery, Tailwind 등 프레임워크·빌드 도구 금지.
-- 외부 의존성 없음. 아이콘은 `app.js`의 `ICONS` 맵에 Lucide 스타일 인라인 SVG로 직접 정의해 쓴다.
-  꼭 라이브러리가 필요하면 Lucide/FontAwesome CDN 하나만, 버전을 고정해서 추가한다.
+- 외부 의존성 최소화. 아이콘은 `app.js`의 `ICONS` 맵에 Lucide 스타일 인라인 SVG로 직접 정의해 쓴다.
+- 유일한 외부 라이브러리는 Firebase compat SDK(`firebase-app-compat`, `firebase-firestore-compat`, 버전 고정, gstatic CDN)이며,
+  공유 코드로 연결된 폰에서만 동적으로 로드한다. 연결 전이나 `FIREBASE_CONFIG`가 `null`이면 로드하지 않고 로컬 전용으로 동작한다.
 - 빌드 단계 없음: `index.html`을 브라우저에서 바로 열거나(`file://`) 정적 서버로 띄우면 즉시 동작해야 한다.
 - ES 모듈(`type="module"`)은 `file://`에서 CORS 문제가 생기므로 쓰지 않는다. 일반 `<script defer>`로 로드한다.
 - 최신 모바일 브라우저(iOS Safari, Android Chrome) 기준. 트랜스파일 없이 동작하는 ES2020 문법까지 사용.
@@ -21,7 +22,7 @@ GitHub Pages(`main` 브랜치 루트)로 정적 배포한다.
 
 ```
 /
-├── index.html   # 마크업: 헤더, 4개 탭 화면, 하단 네비, 바텀시트, 토스트
+├── index.html   # 마크업: 헤더(+ 버튼, 동기화 점), 4개 화면, 하단 네비 3탭, 바텀시트, 토스트
 ├── style.css    # 디자인 토큰(:root 변수), 레이아웃, 컴포넌트, 애니메이션
 ├── app.js       # 상태 관리, 저장소, 렌더링, 이벤트 핸들링
 ├── .gitignore
@@ -54,7 +55,7 @@ python3 -m http.server 8000
 | 원두 이름 | `name` | **필수**. 비어 있으면 저장 차단 + 인라인 에러 |
 | 로스터리(브랜드) | `roastery` | |
 | 원산지 / 품종 | `origin`, `variety` | |
-| 로스팅 포인트 | `roastLevel` | `Light`, `Medium-Light`, `Medium`, `Medium-Dark`, `Dark` 중 하나 또는 `''`. 칩으로 선택, 다시 탭하면 해제 |
+| 로스팅 포인트 | `roastLevel` | `Light`, `Medium-Light`, `Medium`, `Medium-Dark`, `Dark` 중 하나 또는 `''`(저장값은 영문). 화면에는 `ROAST_LABELS`의 한글(라이트·라이트 미디엄·미디엄·미디엄 다크·다크)로 표시. 칩으로 선택, 다시 탭하면 해제 |
 | 카페인 구분 | `decaf` | `false`=카페인, `true`=디카페인. 세그먼트 토글 |
 | 총 그램수(g) | `grams` | 숫자 또는 `null` |
 | 총 가격(원) | `price` | 숫자 또는 `null` |
@@ -71,8 +72,9 @@ python3 -m http.server 8000
 - **메모**: 한 줄 메모(`memo`)와 상세 테이스팅 소감(`notes`, textarea). 평가자 공용.
 
 ### 3. 기록 리스트
-- 카드형 타임라인: 시음 일자, 원두 이름, 로스터리, 종합 점수(평균 + 🐶/🐥 개별), 대표 컵노트 태그 최대 3개.
-- 카드 탭 시 바텀시트로 상세 보기(전체 정보, 항목별 평점 비교 막대, 메모). 시트 안에서 **수정 / 삭제**(삭제는 confirm).
+- 카드만 보고도 핵심 정보가 다 보이게 한다(참고 디자인: 정보 pill + 이모지):
+  시음 일자(있으면) → 원두 이름 + ⚡ 카페인/🌙 디카페인 pill → 로스터리 pill → 🔥 로스팅(단계별 색) · ⚖️ 용량 · 💰 가격 · ₩/g(파란색) pill → 한 줄 메모 → 태그 최대 3개 → 하단에 🐶/🐥 종합 점수와 수정·삭제 아이콘 버튼.
+- 카드 아무 곳이나 탭하면 바텀시트로 상세 보기(제목 버튼의 `::after`가 카드 전체를 덮는 stretched-link 방식, 하단 버튼만 그 위에 올라감). 시트 안에서도 **수정 / 삭제**(삭제는 confirm).
 - 검색: 원두 이름·로스터리 부분 일치, 대소문자 무시, 입력 즉시 필터.
 - 필터(필터 버튼으로 패널 열기, 그룹별 단일 선택·다시 탭하면 해제, 검색·정렬과 함께 적용):
   - 브랜드: 기록에 있는 `roastery` 값으로 칩 자동 생성
@@ -85,7 +87,16 @@ python3 -m http.server 8000
 - 궁금한 원두를 따로 기록. 항목: 원두 이름(필수), 브랜드(`roastery`), 종류(`decaf`), 용량(`grams`), 가격(`price`), 그램 당 가격(`pricePerGram`, 저장), 메모(`notes`).
 - 카드 목록(최근 추가순) + "담기" 버튼. 추가·수정·삭제는 바텀시트 폼에서.
 
-### 5. 통계 / 설정 탭
+### 5. 실시간 동기화 (공유 코드)
+- 통계/설정 탭에서 "새 코드 만들기"(24자, `xxxx-xxxx-…`) → "연결하기". 다른 폰은 "링크 보내기"로 받은 `#join=<코드>` 링크를 열면 바로 연결 절차가 시작된다.
+- 이미 데이터가 있는 공간에 연결하면 "공유 기록으로 시작하기(추천) / 이 폰 기록도 합치기"를 고른다.
+- Firestore 구조: `journeys/{code}`(`customTags`), `journeys/{code}/records/{id}`, `journeys/{code}/wishlist/{id}`. 문서 id = 기록 id(`safeId()`로 `[A-Za-z0-9_-]`만 허용).
+- 동작 원리: 모든 변경은 `save()` → `saveLocal()` + `pushChanges()`. `pushChanges()`는 `sync.remote`(서버에 있다고 알려진 상태, `coffeeJourney.syncBase`에 보관)와 현재 데이터를 비교해 바뀐 문서만 set/delete 한다. `onSnapshot`으로 받은 서버 데이터가 로컬 데이터를 대체한다(문서 단위 last-write-wins).
+- 다른 폰의 변경이 오면 목록·위시·통계를 애니메이션 없이 다시 그리고, 열려 있는 상세 시트도 갱신한다. 작성 중인 폼과 입력 중인 설정 탭은 건드리지 않는다.
+- 오프라인: Firestore 오프라인 캐시(`enablePersistence`)가 쓰기를 대기시켰다가 재연결 시 전송. 헤더의 점 색으로 상태 표시(초록=동기화 중, 주황=오프라인, 빨강=오류).
+- 보안 규칙: 코드 길이 20자 이상인 경로만 읽기/쓰기, `journeys` 컬렉션 목록 조회는 금지(코드를 모르면 접근 불가).
+
+### 6. 통계 / 설정 탭
 - 통계: 총 기록 수, 평균 종합 점수(전체·🐶·🐥), 평균 그램 당 가격, 맛 프로필 평균(🐶 vs 🐥), 플레이버 태그 Top 5, 로스팅 포인트 분포. 차트 라이브러리 없이 CSS 막대로 그린다.
 - 데이터 관리:
   - **Export**: 전체 데이터를 `coffee-journey-YYYYMMDD.json`으로 다운로드(`Blob` + `a[download]`).
@@ -100,7 +111,7 @@ const STORAGE_KEY = 'coffeeJourney.v1';
 
 // 저장 형태
 {
-  version: 2,
+  version: 2,   // localStorage 캐시. 동기화 중엔 Firestore가 원본
   customTags: ['밀크초콜릿', ...],
   records: [{
     id: 'r_lx3k9a_4f2',             // uid()
@@ -136,16 +147,18 @@ const STORAGE_KEY = 'coffeeJourney.v1';
 - **v1 → v2 마이그레이션**: 예전 데모 기록(id `sample_*`)과 쓰이지 않는 `블랙커런트` 태그를 지우고, seed 기록·위시를 추가한다. 사용자가 직접 쓴 기록은 그대로 둔다.
 - 저장된 JSON이 깨져 있으면 원본을 `coffeeJourney.v1.corrupt` 키에 백업한 뒤 빈 상태로 시작한다.
 - 스키마를 바꾸면 `version`을 올리고 `migrate()`에서 이전 데이터를 변환한다. 기존 사용자 데이터를 절대 버리지 않는다.
+- 동기화 관련 키: `coffeeJourney.sync`(`{ code }`), `coffeeJourney.syncBase`(서버 기준 상태).
 - 사용자 입력을 DOM에 넣을 때는 `escapeHTML()`을 거친다(import 데이터 포함, `innerHTML`에 원본 문자열 직접 삽입 금지).
 
 ## 앱 구조 (app.js)
 
 IIFE 하나 안에서 섹션 주석으로 구분한다:
 
-1. **Constants** — 저장 키, 로스팅 포인트·기본 태그·맛 항목 목록, 평가자 정의, 점수 스케일(`TASTE_SCALE`, `OVERALL_SCALE`), `ICONS`
+1. **Constants** — 저장 키, `FIREBASE_CONFIG`·SDK URL·동기화 키, `ROAST_LABELS`, 로스팅 포인트·기본 태그·맛 항목 목록, 평가자 정의, 점수 스케일(`TASTE_SCALE`, `OVERALL_SCALE`), `ICONS`
 2. **Utils** — `escapeHTML`, `uid`, `toNum`, `formatDate`, `formatWon`, `calcPricePerGram`, `avgOverall`, `toast`
 3. **Storage** — `load()`, `save()`, `migrate()`, `normalizeRecord()`, `normalizeWish()`, `seedData()`
-4. **State** — `state = { data, view, query, sort, filters, filterOpen, editingId, formReady, formTags, pendingImport }`
+4. **State** — `state = { data, view, query, sort, filters, filterOpen, editingId, formReady, formTags, detailId, pendingImport, quietRender }`
+4-1. **Sync** — `sync` 객체, `linkSync()`, `resumeSync()`, `pushChanges()`, `applyRemote()`, `unlinkSync()`
 5. **Render** — `renderList()`/`renderFilters()`, `renderForm()`, `renderDetail(id)`, `renderWish()`/`openWishForm(id)`, `renderStats()`
 6. **Sheet** — 바텀시트 열기/닫기(포커스 복귀, ESC·배경 탭 닫기)
 7. **Events** — 컨테이너 단위 이벤트 위임(`data-action`)
@@ -173,13 +186,15 @@ IIFE 하나 안에서 섹션 주석으로 구분한다:
 ```
 
 - 톤: 따뜻하고 아기자기한 감성. 둥근 모서리, 부드러운 그림자, 이모지(☕🐶🐥) 포인트 사용.
-- 🐶 강아지 색 `--dog`, 🐥 병아리 색 `--chick`으로 비교 막대를 구분한다.
+- 🐶 강쥐 색 `--dog`, 🐥 공쥬 색 `--chick`으로 비교 막대를 구분한다.
+- 로스팅 색은 옅은 색 → 짙은 색: `--roast-light-*` → `--roast-ml-*` → `--roast-m-*` → `--roast-md-*` → `--roast-d-*`(bg/fg 쌍). `.roast-<level>` 클래스가 `--roast-bg`/`--roast-fg`를 설정하고 pill·칩·통계 막대가 함께 쓴다.
+- 정보 pill: 기본 `--pill-bg`, 카페인·₩/g는 `--caffeine-*`(파랑), 디카페인은 `--decaf-*`(초록).
 - 폰트: 시스템 폰트 스택(`-apple-system, 'Apple SD Gothic Neo', 'Pretendard', 'Noto Sans KR', sans-serif`).
 
 ### 레이아웃
 - 모바일 퍼스트. 앱 컨테이너 `max-width: 480px; margin: 0 auto;` 로 중앙 정렬, 데스크톱에서는 바깥 배경을 살짝 어둡게 해 "폰 화면" 느낌.
-- **상단 고정 헤더**: "Coffee Journey ☕" 타이틀.
-- **하단 고정 네비게이션** 4탭: [기록 목록] [새 기록] [위시리스트] [통계/설정]. 활성 탭은 `--primary` 강조.
+- **상단 고정 헤더**: 왼쪽 "Coffee Journey ☕" 타이틀, 오른쪽 동기화 상태 점 + **새 기록(⊕) 버튼**.
+- **하단 고정 네비게이션** 3탭: [기록 목록] [위시리스트] [통계/설정]. 새 기록은 헤더 버튼으로만 연다. 활성 탭은 `--primary` 강조.
 - 고정 바는 480px 컨테이너 폭에 맞추고, 본문에 헤더/네비 높이만큼 padding.
 - iOS 노치/홈 인디케이터 대응: `viewport-fit=cover` + `env(safe-area-inset-*)`.
 - 가로 스크롤이 생기지 않도록 한다.
@@ -212,4 +227,5 @@ IIFE 하나 안에서 섹션 주석으로 구분한다:
 - [ ] 검색 + 필터(브랜드·종류·로스팅) + 정렬이 함께 올바르게 동작
 - [ ] 빈 점수는 `null`로 저장되고 `-`로 표시, 평균에서 제외
 - [ ] Export → Import 왕복 시 데이터 동일, 잘못된 JSON은 기존 데이터 보존
+- [ ] 동기화: 두 기기에서 추가·수정·삭제·위시·태그가 서로 반영, 새로고침 후에도 연결 유지 (실제 Firebase 없이 테스트할 땐 gstatic SDK를 가짜 Firestore로 대체)
 - [ ] 콘솔 에러 없음

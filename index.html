@@ -14,6 +14,10 @@
   <div class="app">
     <header class="app-header">
       <h1 class="app-title">Coffee Journey <span aria-hidden="true">☕</span></h1>
+      <div class="header-actions">
+        <span class="sync-dot" id="sync-dot" role="img" hidden></span>
+        <button type="button" class="header-add" id="new-record-btn" aria-label="새 기록 작성"><span data-icon="circle-plus"></span></button>
+      </div>
     </header>
 
     <main class="app-main">
@@ -27,10 +31,6 @@
       <button type="button" class="nav-btn" data-nav="list">
         <span class="nav-icon" data-icon="home"></span>
         <span class="nav-label">기록 목록</span>
-      </button>
-      <button type="button" class="nav-btn nav-btn-new" data-nav="form">
-        <span class="nav-icon nav-icon-new" data-icon="plus"></span>
-        <span class="nav-label">새 기록</span>
       </button>
       <button type="button" class="nav-btn" data-nav="wish">
         <span class="nav-icon" data-icon="heart"></span>
